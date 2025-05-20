@@ -162,14 +162,16 @@ type InvoiceRequest struct {
 	ProcessedAt        *time.Time `json:"processed_at"` // 指针，允许为空
 }
 
-// InvoiceRequestPayload 用户提交发票请求时的请求体结构
+// models/invoice_payload.go (或者 models/invoice.go 中的结构体定义)
+
 type InvoiceRequestPayload struct {
-	StartDate      string `json:"start_date"` // "YYYY-MM-DD"
-	EndDate        string `json:"end_date"`   // "YYYY-MM-DD"
-	BillingTitle   string `json:"billing_title"`
-	TaxID          string `json:"tax_id"` // 前端可能传空字符串
-	BillingAddress string `json:"billing_address"`
+	StartDate      string `json:"startDate"`      // <-- 改为 startDate
+	EndDate        string `json:"endDate"`        // <-- 改为 endDate
+	BillingTitle   string `json:"billingTitle"`   // <-- 改为 billingTitle
+	TaxID          string `json:"taxIdOmitempty"` // <-- 改为 taxIdOmitempty
+	BillingAddress string `json:"billingAddress"` // <-- 改为 billingAddress
 }
+
 
 // InvoiceRequestFilter 用于过滤发票请求历史 (可选)
 type InvoiceRequestFilter struct {

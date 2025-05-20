@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/rs/cors"
 	_ "github.com/go-sql-driver/mysql"
 
 	// --- 导入内部包 ---
@@ -100,12 +101,25 @@ func main() {
 	mux.Handle("GET /invoices", authHandler(http.HandlerFunc(h.GetUserInvoicesHandler)))
 	mux.Handle("GET /invoices/{id}", authHandler(http.HandlerFunc(h.GetUserInvoiceDetailsHandler)))
  
-
+    // --- 新增：管理员获取待审核列表的接口 ---
+    mux.Handle("GET /admin/ads/pending", adminRequiredHandler(http.HandlerFunc(h.AdminGetPendingAdsHandler)))
+    mux.Handle("GET /admin/campaigns/pending", adminRequiredHandler(http.HandlerFunc(h.AdminGetPendingCampaignsHandler)))
 	// 需要管理员认证的接口
 	mux.Handle("PATCH /ads/{id}/status", adminRequiredHandler(http.HandlerFunc(h.ReviewAdHandler)))
 	mux.Handle("PATCH /campaigns/{id}/status", adminRequiredHandler(http.HandlerFunc(h.ReviewCampaignHandler)))
     // --- (可选) 管理员处理发票接口 ---
     // mux.Handle("PATCH /admin/invoices/{id}/status", adminRequiredHandler(http.HandlerFunc(h.AdminUpdateInvoiceStatusHandler))) // 需要实现 AdminUpdateInvoiceStatusHandler
+	
+	c := cors.New(cors.Options{
+        AllowedOrigins: []string{"http://localhost:5173"}, // 允许来自前端的地址
+        AllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"}, // 允许的 HTTP 方法
+        AllowedHeaders: []string{"Authorization", "Content-Type"}, // 允许的请求头
+        AllowCredentials: true, // 允许携带认证信息
+        Debug: true, // 开启 Debug 模式，可以在后端终端看到 CORS 相关的日志
+    })
+
+    // 使用 CORS 中间件包裹您的 Mux
+    handler := c.Handler(mux)
 	
 	// 启动服务器
 	port := ":8080"
@@ -131,9 +145,10 @@ func main() {
     log.Printf("  PATCH http://localhost%s/my-campaigns/{id}/cancel (需要认证, 用户取消活动)", port) // <-- 更新日志
 	log.Printf("  PATCH http://localhost%s/ads/{id}/status (需要管理员认证)", port)
 	log.Printf("  PATCH http://localhost%s/campaigns/{id}/status (需要管理员认证)", port)
+	log.Printf("  GET  http://localhost%s/admin/ads/pending (需要管理员认证, 获取待审核广告)", port)
+    log.Printf("  GET  http://localhost%s/admin/campaigns/pending (需要管理员认证, 获取待审核活动)", port)
 
-
-	serveErr := http.ListenAndServe(port, mux)
+	serveErr := http.ListenAndServe(port, handler) // <-- 修改为使用包裹后的 handler
 	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 		log.Fatalf("服务器启动失败: %v", serveErr)
 	}

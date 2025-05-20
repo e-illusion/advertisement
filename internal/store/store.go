@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors" // 用于自定义错误类型
 	"fmt"    // 用于错误包装
-	"log"    // 临时用于记录
+	"log"    // 临时用于记录c
 	"strings"
 	"time"
 
@@ -41,9 +41,9 @@ type Store interface {
 	CreateAdCampaign(ctx context.Context, campaign *models.AdCampaign) (int64, error)
 	UpdateAdCampaignStatus(ctx context.Context, campaignID int, status string) error
 	GetAdCampaignByID(ctx context.Context, campaignID int) (*models.AdCampaign, error)
-	// GetAdCampaignsByUserID(ctx context.Context, userID int) ([]models.AdCampaign, error) // 可选
-	// GetPendingAdCampaigns(ctx) ([]models.AdCampaign, error) // 可选
-  
+    GetPendingAdvertisements(ctx context.Context) ([]models.Advertisement, error)
+    GetPendingCampaigns(ctx context.Context) ([]models.AdCampaign, error)
+
 	// --- 替换 GetRandomApprovedAd ---
 	GetRandomActiveCampaignAd(ctx context.Context) (*models.Advertisement, error) // 返回活动广告的创意信息
 
@@ -239,7 +239,7 @@ func (s *DBStore) GetAdvertisementsByUserID(ctx context.Context, userID int) ([]
 
 // ... DBStore struct, NewDBStore, CreateUser, GetUserByUsername, CreateAdvertisement, GetAdvertisementsByUserID, GetRandomApprovedAd ...
 
-// (可选) GetAdvertisementByID 根据 ID 获取广告信息
+// GetAdvertisementByID 根据 ID 获取广告信息
 func (s *DBStore) GetAdvertisementByID(ctx context.Context, adID int) (*models.Advertisement, error) {
     ad := &models.Advertisement{}
     query := `SELECT id, title, image_url, target_url, user_id, status FROM advertisements WHERE id = ?`
@@ -251,6 +251,33 @@ func (s *DBStore) GetAdvertisementByID(ctx context.Context, adID int) (*models.A
         return nil, fmt.Errorf("store: failed to get advertisement by id %d: %w", adID, err)
     }
     return ad, nil
+}
+
+// GetPendingAdvertisements 获取所有状态为 "Pending" 的广告创意列表
+func (s *DBStore) GetPendingAdvertisements(ctx context.Context) ([]models.Advertisement, error) {
+	query := `SELECT id, title, image_url, target_url, user_id, status FROM advertisements WHERE status = ? ORDER BY id DESC`
+	rows, err := s.db.QueryContext(ctx, query, "Pending") // 使用 QueryContext
+	if err != nil {
+		return nil, fmt.Errorf("store: failed to query pending advertisements: %w", err)
+	}
+	defer rows.Close()
+
+	var ads []models.Advertisement
+	for rows.Next() {
+		var ad models.Advertisement
+		if err := rows.Scan(&ad.ID, &ad.Title, &ad.ImageURL, &ad.TargetURL, &ad.UserID, &ad.Status); err != nil {
+			// 记录具体扫描错误可能有助于调试
+			log.Printf("store: failed to scan pending advertisement row: %v", err)
+			return nil, fmt.Errorf("store: error processing pending advertisements list: %w", err)
+		}
+		ads = append(ads, ad)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: error iterating pending advertisements rows: %w", err)
+	}
+
+	return ads, nil
 }
 
 
@@ -331,6 +358,45 @@ func (s *DBStore) GetAdCampaignByID(ctx context.Context, campaignID int) (*model
     return campaign, nil
 }
 
+// GetPendingCampaigns 获取所有状态为 "Pending" 的广告活动列表
+func (s *DBStore) GetPendingCampaigns(ctx context.Context) ([]models.AdCampaign, error) {
+	query := `
+		SELECT id, advertisement_id, user_id, start_date, end_date, status, created_at, updated_at
+		FROM ad_campaigns
+		WHERE status = ?
+		ORDER BY id DESC
+	`
+	rows, err := s.db.QueryContext(ctx, query, "Pending") // 使用 QueryContext
+	if err != nil {
+		return nil, fmt.Errorf("store: failed to query pending campaigns: %w", err)
+	}
+	defer rows.Close()
+
+	var campaigns []models.AdCampaign
+	for rows.Next() {
+		var camp models.AdCampaign
+		if err := rows.Scan(
+			&camp.ID,
+			&camp.AdvertisementID,
+			&camp.UserID,
+			&camp.StartDate,
+			&camp.EndDate,
+			&camp.Status,
+			&camp.CreatedAt,
+			&camp.UpdatedAt,
+		); err != nil {
+			log.Printf("store: failed to scan pending campaign row: %v", err)
+			return nil, fmt.Errorf("store: error processing pending campaigns list: %w", err)
+		}
+		campaigns = append(campaigns, camp)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: error iterating pending campaigns rows: %w", err)
+	}
+
+	return campaigns, nil
+}
 
 func (s *DBStore) UpdateAdCampaignStatus(ctx context.Context, campaignID int, status string) error {
     query := "UPDATE ad_campaigns SET status = ? WHERE id = ?"
@@ -768,7 +834,6 @@ func (s *DBStore) GetAdPerformanceSummary(ctx context.Context, userID int, filte
     baseQuery := `
         SELECT
             evt.campaign_id,
-            camp.name AS campaign_name,
             evt.advertisement_id,
             adv.title AS ad_title,
             SUM(CASE WHEN evt.event_type = 'Impression' THEN 1 ELSE 0 END) AS impressions,
@@ -798,7 +863,7 @@ func (s *DBStore) GetAdPerformanceSummary(ctx context.Context, userID int, filte
 
     // 组合查询
     finalQuery := baseQuery + " WHERE " + strings.Join(conditions, " AND ") +
-                  " GROUP BY evt.campaign_id, camp.name, evt.advertisement_id, adv.title" +
+                  " GROUP BY evt.campaign_id, evt.advertisement_id, adv.title" +
                   " ORDER BY evt.campaign_id, evt.advertisement_id" // 按活动和创意排序
 
     log.Printf("Executing ad performance summary query for user %d: %s with args: %v", userID, finalQuery, args)
@@ -814,7 +879,6 @@ func (s *DBStore) GetAdPerformanceSummary(ctx context.Context, userID int, filte
         var summary models.AdPerformanceSummary
         err := rows.Scan(
             &summary.CampaignID,
-            &summary.CampaignName,
             &summary.AdvertisementID,
             &summary.AdTitle,
             &summary.Impressions,
@@ -839,10 +903,10 @@ func (s *DBStore) GetRandomActiveCampaign(ctx context.Context) (*models.AdCampai
     query := `
         SELECT id, advertisement_id, user_id, start_date, end_date, status, created_at, updated_at
         FROM ad_campaigns
-        WHERE status = 'Active' -- 或者 'Approved' 并且在 start_date 和 end_date 之间
+        WHERE status = 'Active' 
           AND start_date <= NOW()
           AND end_date >= NOW()
-        ORDER BY RAND() -- 注意：RAND() 在大数据量下性能不佳，但对于示例可以接受
+        ORDER BY RAND() 
         LIMIT 1
     `
     var camp models.AdCampaign
@@ -859,6 +923,7 @@ func (s *DBStore) GetRandomActiveCampaign(ctx context.Context) (*models.AdCampai
     }
     return &camp, nil
 }
+
 
 // --- 实现发票相关方法 ---
 
@@ -1081,4 +1146,3 @@ func (s *DBStore) UpdateInvoiceRequestStatus(ctx context.Context, invoiceID int6
 // --- Helper: Check if DBStore implements Store ---
 // 这个赋值语句如果编译不通过，说明 DBStore 没有完全实现 Store 接口
 var _ Store = (*DBStore)(nil)
-

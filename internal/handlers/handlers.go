@@ -140,7 +140,12 @@ func (h *Handler) LoginHandler(w http.ResponseWriter, r *http.Request) {
     log.Printf("用户登录成功: %s (Role: %s), 生成 Token", user.Username, user.Role) // 日志可以加上角色
     webutil.RespondWithJSON(w, http.StatusOK, webutil.Response{
         Message: "登录成功",
-        Data:    map[string]string{"token": tokenString},
+        Data:    map[string]interface{} {
+            "token": tokenString,
+            "id": user.ID,
+            "username": user.Username,
+            "role": user.Role,
+        },
     })
 }
 
@@ -310,6 +315,55 @@ func (h *Handler) GetUserAdsHandler(w http.ResponseWriter, r *http.Request) {
 	webutil.RespondWithJSON(w, http.StatusOK, webutil.Response{Data: userAds}) // 直接返回从 Store 获取的切片
 }
 
+// --- 新增：AdminGetPendingAdsHandler 获取待审核广告列表 (管理员) ---
+func (h *Handler) AdminGetPendingAdsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		webutil.RespondWithError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+		return
+	}
+
+	// AuthMiddleware 和 AdminMiddleware 已经确保了用户是管理员
+	// 所以这里不需要再次检查角色
+
+	pendingAds, err := h.Store.GetPendingAdvertisements(r.Context())
+	if err != nil {
+		log.Printf("管理员获取待审核广告列表失败: %v", err)
+		webutil.RespondWithError(w, http.StatusInternalServerError, "获取待审核广告列表失败")
+		return
+	}
+
+	if pendingAds == nil { // 确保返回空数组而不是 null
+	    pendingAds = []models.Advertisement{}
+	}
+
+	log.Printf("管理员成功获取 %d 条待审核广告", len(pendingAds))
+	webutil.RespondWithJSON(w, http.StatusOK, webutil.Response{Data: pendingAds})
+}
+
+// --- 新增：AdminGetPendingCampaignsHandler 获取待审核活动列表 (管理员) ---
+func (h *Handler) AdminGetPendingCampaignsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		webutil.RespondWithError(w, http.StatusMethodNotAllowed, "仅支持 GET 方法")
+		return
+	}
+
+	// AuthMiddleware 和 AdminMiddleware 已经确保了用户是管理员
+
+	pendingCampaigns, err := h.Store.GetPendingCampaigns(r.Context())
+	if err != nil {
+		log.Printf("管理员获取待审核活动列表失败: %v", err)
+		webutil.RespondWithError(w, http.StatusInternalServerError, "获取待审核活动列表失败")
+		return
+	}
+	
+	if pendingCampaigns == nil { // 确保返回空数组而不是 null
+	    pendingCampaigns = []models.AdCampaign{}
+	}
+
+	log.Printf("管理员成功获取 %d 条待审核活动", len(pendingCampaigns))
+	webutil.RespondWithJSON(w, http.StatusOK, webutil.Response{Data: pendingCampaigns})
+}
+
 // --- 新增：ReviewAdHandler 方法处理广告审核 ---
 func (h *Handler) ReviewAdHandler(w http.ResponseWriter, r *http.Request) {
 	// 1. 检查请求方法 (使用 PATCH)
@@ -388,6 +442,7 @@ func (h *Handler) ReviewAdHandler(w http.ResponseWriter, r *http.Request) {
 		Message: fmt.Sprintf("广告 %d 状态已更新为 %s", adID, newStatus),
 	})
 }
+
 
 // --- RequestCampaignHandler 处理用户提交广告活动请求 ---
 func (h *Handler) RequestCampaignHandler(w http.ResponseWriter, r *http.Request) {

@@ -21,7 +21,7 @@ type Claims struct {
 // GenerateJWT 生成一个新的 JWT 字符串
 func GenerateJWT(userID int, username string, role string) (string, time.Time, error) { // <-- 添加 role 参数 {
     // 设置过期时间 (例如，1 小时)
-	expirationTime := time.Now().Add(1 * time.Hour)
+	expirationTime := time.Now().Add(24 * time.Hour)
 
 	claims := &Claims{
 		Username: username,
